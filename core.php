@@ -1,14 +1,10 @@
 <?php
 /**
- * Plugin Name: PW User Geo
- * Description: Detects the visitor’s IP (proxy-aware) using a local MaxMind GeoLite2-Country.mmdb file. Caches results and exposes a shortcode/helper to display the country.
- * Version:     1.1.1
- * Author:      Yaniv Sasson
- * License:     GPL-2.0+
- * Text Domain: pw-user-geo
+ * CoWeb User Geo Redirect: country detection, redirect AJAX endpoint, shortcodes.
+ * Loaded by coweb-user-geo-redirect.php after it checks that no older version is active.
  */
 
-if ( ! defined( 'ABSPATH' ) ) exit;
+if ( ! defined( 'ABSPATH' ) || ! defined( 'PW_USER_GEO_FILE' ) ) exit;
 
 // Load Composer (for geoip2/geoip2) if present
 if ( file_exists( __DIR__ . '/vendor/autoload.php' ) ) {
@@ -22,7 +18,7 @@ if ( ! defined( 'PW_USER_GEO_MAXMIND_DB' ) ) {
 
 final class PW_User_Geo {
 	const TRANSIENT_PREFIX = 'pw_user_geo_';
-	const VERSION          = '1.1.1';
+	const VERSION          = '1.1.2';
 
 	private static $instance = null;
 
@@ -42,13 +38,13 @@ final class PW_User_Geo {
 				// If there was an error or no country detected, return a readable fallback message.
 				if ( ! empty( $data['error'] ) ) {
 					return sprintf(
-						__( 'Unable to detect location: %s', 'pw-user-geo' ),
+						__( 'Unable to detect location: %s', 'coweb-user-geo-redirect' ),
 						esc_html( $data['error'] )
 					);
 				}
 
 				if ( empty( $data['country'] ) ) {
-					return __( 'Unable to detect your location.', 'pw-user-geo' );
+					return __( 'Unable to detect your location.', 'coweb-user-geo-redirect' );
 				}
 
 				// Otherwise, return the normal array
@@ -88,7 +84,10 @@ final class PW_User_Geo {
 		return '0.0.0.0';
 	}
 
-	private function get_maxmind_db_path(): ?string {
+	/**
+	 * Path to the readable .mmdb file, or null when it is missing.
+	 */
+	public function get_maxmind_db_path(): ?string {
 		$path = apply_filters( 'pw_user_geo_maxmind_db_path', PW_USER_GEO_MAXMIND_DB );
 		$path = is_string( $path ) ? $path : '';
 		if ( $path && file_exists( $path ) && is_readable( $path ) ) return $path;
@@ -99,9 +98,10 @@ final class PW_User_Geo {
 	 * Country-only lookup using local GeoLite2-Country.mmdb.
 	 */
 	public function get_location_data( $ip = null ): array {
-		// Optional dev helper: force IP via ?pw_geo_ip=
-		if ( isset($_GET['pw_geo_ip']) && filter_var($_GET['pw_geo_ip'], FILTER_VALIDATE_IP) ) {
-			$ip = $_GET['pw_geo_ip'];
+		// Optional dev helper: force IP via ?pw_geo_ip= (the redirect script forwards it to AJAX)
+		$override = $_GET['pw_geo_ip'] ?? ( wp_doing_ajax() ? ( $_POST['pw_geo_ip'] ?? '' ) : '' );
+		if ( is_string( $override ) && filter_var( $override, FILTER_VALIDATE_IP ) ) {
+			$ip = $override;
 		}
 
 		$ip = $ip ?: $this->get_client_ip();
@@ -180,9 +180,9 @@ final class PW_User_Geo {
 		$show_labels = $atts['show_labels'] === '1';
 
 		$labels = [
-			'ip'           => __( 'IP', 'pw-user-geo' ),
-			'country'      => __( 'Country', 'pw-user-geo' ),
-			'country_code' => __( 'Country Code', 'pw-user-geo' ),
+			'ip'           => __( 'IP', 'coweb-user-geo-redirect' ),
+			'country'      => __( 'Country', 'coweb-user-geo-redirect' ),
+			'country_code' => __( 'Country Code', 'coweb-user-geo-redirect' ),
 		];
 
 		$items = [];
@@ -199,7 +199,7 @@ final class PW_User_Geo {
 			if ( ! empty( $data['error'] ) ) {
 				return '<div class="pw-user-geo pw-user-geo--error">' . esc_html( $data['error'] ) . '</div>';
 			}
-			return '<div class="pw-user-geo pw-user-geo--empty">' . esc_html__( 'Location unavailable', 'pw-user-geo' ) . '</div>';
+			return '<div class="pw-user-geo pw-user-geo--empty">' . esc_html__( 'Location unavailable', 'coweb-user-geo-redirect' ) . '</div>';
 		}
 
 		switch ( $atts['wrapper'] ) {
@@ -234,6 +234,9 @@ if ( ! function_exists( 'pw_user_geo_redirect_html' ) ) {
 		$inline = <<<JS
 (function(){
   try{
+    // Run once per page, even if both the automatic script and a shortcode are present
+    if (window.pwUserGeoRedirectRan) return;
+    window.pwUserGeoRedirectRan = true;
     var uri  = location.pathname + location.search;
     var data = new URLSearchParams();
     data.append('action','pw_user_geo_redirect');
@@ -241,8 +244,11 @@ if ( ! function_exists( 'pw_user_geo_redirect_html' ) ) {
     data.append('host', location.host);
     // optional bypass via ?geo_noredirect=1 (sets cookie)
     if (/[?&]geo_noredirect=1(&|$)/.test(location.search)) {
-      document.cookie='pw_geo_noredirect=1; max-age='+(30*24*3600)+'; path=/';
+      document.cookie='pw_geo_noredirect=1; max-age='+(30*24*3600)+'; path=/; SameSite=Lax';
     }
+    // testing helper: ?pw_geo_ip=1.2.3.4 looks up that IP instead of the visitor's
+    var testIp = new URLSearchParams(location.search).get('pw_geo_ip');
+    if (testIp) data.append('pw_geo_ip', testIp);
     fetch('{$ajax}', {
       method: 'POST',
       credentials: 'same-origin',
@@ -252,6 +258,10 @@ if ( ! function_exists( 'pw_user_geo_redirect_html' ) ) {
       if(!res || !res.success || !res.data) return;
       if(res.data.redirect && res.data.url){
         if (res.data.url.replace(/\\/+$/,'') !== location.href.replace(/\\/+$/,'')) {
+          // "Redirect once": remember this visitor on this site for 30 days
+          if (res.data.once) {
+            document.cookie='pw_geo_redirected=1; max-age='+(30*24*3600)+'; path=/; SameSite=Lax';
+          }
           location.replace(res.data.url);
         }
       }
@@ -429,7 +439,7 @@ if ( ! function_exists( 'pw_user_geo_redirect_ajax' ) ) {
 
                 nocache_headers();
 
-                $opt = wp_parse_args( get_option( PW_USER_GEO_REDIRECT_OPTION ), pw_user_geo_redirect_default_options() );
+                $opt = pw_user_geo_redirect_get_options();
 
                 $send = static function ( array $payload, string $reason, array $debug = [] ) {
                         $payload['reason'] = $reason;
@@ -466,6 +476,10 @@ if ( ! function_exists( 'pw_user_geo_redirect_ajax' ) ) {
 
                 if ( ! empty( $opt['respect_bypass'] ) && ! empty( $_COOKIE['pw_geo_noredirect'] ) ) {
                         $send( [ 'redirect' => false ], 'bypass_cookie' );
+                }
+
+                if ( ! empty( $opt['once'] ) && ! empty( $_COOKIE['pw_geo_redirected'] ) ) {
+                        $send( [ 'redirect' => false ], 'already_redirected' );
                 }
 
                 // Input from client
@@ -532,6 +546,7 @@ if ( ! function_exists( 'pw_user_geo_redirect_ajax' ) ) {
                                 'redirect' => true,
                                 'url'      => $target,
                                 'cc'       => $cc,
+                                'once'     => ! empty( $opt['once'] ),
                         ],
                         'rule_match',
                         $debug
@@ -541,9 +556,21 @@ if ( ! function_exists( 'pw_user_geo_redirect_ajax' ) ) {
 add_action( 'wp_ajax_pw_user_geo_redirect',        'pw_user_geo_redirect_ajax' );
 add_action( 'wp_ajax_nopriv_pw_user_geo_redirect', 'pw_user_geo_redirect_ajax' );
 
+// 3) Add the redirect script automatically ("Run automatically" setting)
+add_action( 'wp_head', function () {
+	if ( is_admin() || is_feed() || is_embed() ) return;
+	$opt = pw_user_geo_redirect_get_options();
+	if ( empty( $opt['enabled'] ) ) return;
+
+	$mode = $opt['auto_insert'] ?? 'none';
+	if ( $mode === 'all' || ( $mode === 'home' && is_front_page() ) ) {
+		echo pw_user_geo_redirect_html(); // phpcs:ignore WordPress.Security.EscapeOutput -- static script
+	}
+}, 1 );
+
 /**
  * ===============================
- * PW User Geo – Country display (cache-safe)
+ * Country display (cache-safe)
  * ===============================
  *
  * - pw_user_geo_country()         -> server-side value (not cache-safe)
@@ -599,3 +626,25 @@ if ( ! function_exists('pw_user_geo_js_country') ) {
 		exit;
 	}
 }
+
+/**
+ * ===============================
+ * Names kept from the "User Geo Redirect" multisite plugin
+ * ===============================
+ *
+ * - [user_country format="name|code"] -> shortcode (not cache-safe)
+ * - ugr_get_user_country( 'name'|'code' )
+ */
+if ( ! function_exists( 'ugr_get_user_country' ) ) {
+	function ugr_get_user_country( $format = 'name' ): string {
+		$geo = pw_user_geo_get();
+		if ( ! is_array( $geo ) ) return '';
+		$key = $format === 'code' ? 'country_code' : 'country';
+		return (string) ( $geo[ $key ] ?? '' );
+	}
+}
+
+add_shortcode( 'user_country', function ( $atts ) {
+	$atts = shortcode_atts( [ 'format' => 'name' ], $atts, 'user_country' );
+	return esc_html( ugr_get_user_country( $atts['format'] ) );
+} );
