@@ -1,100 +1,151 @@
-# PW User Geo 🌍
+# PW User Geo
 
-A lightweight WordPress plugin to detect a visitor’s country using a **local MaxMind GeoLite2-Country** database (no external API calls).  
-Includes optional **geolocation-based redirect rules** and **cache-safe front-end display** via shortcodes or helper functions.
+A lightweight WordPress plugin that detects a visitor's country from a local
+MaxMind GeoLite2-Country database. It makes no external API calls.
 
----
+It also offers optional country-based redirect rules and a cache-safe way to
+show the visitor's country through shortcodes or PHP helpers.
 
-## 🧰 Features
+## Features
 
-✅ Detects user location (country & ISO code) using `GeoLite2-Country.mmdb`  
-✅ Works fully **offline** (no API requests)  
-✅ Caches results per IP to improve performance  
-✅ Admin settings page for country → URL redirect rules  
-✅ Supports “skip for logged-in/admin users” and `?geo_noredirect=1` bypass  
-✅ Shortcodes and PHP functions for showing country or triggering redirect  
-✅ AJAX and JS-based output to avoid cache issues  
+- Detects the visitor's country name and ISO code from `GeoLite2-Country.mmdb`
+- Works fully offline (no API requests)
+- Proxy/CDN-aware IP detection (Cloudflare, `X-Real-IP`, `X-Forwarded-For`)
+- Caches the result per IP in a transient (12 hours by default)
+- Settings page for country → URL redirect rules
+- Can skip redirects for logged-in users and administrators, and honours a
+  `?geo_noredirect=1` bypass
+- Redirects and country output run through AJAX, so they work behind page caches
 
----
+## Requirements
 
-## 📦 Installation
+- WordPress 6.0+
+- PHP 7.4+ (tested up to PHP 8.3)
+- The `geoip2/geoip2` Composer package (bundled in the release ZIP)
+- A MaxMind GeoLite2-Country database (not bundled, see below)
 
-1. Copy the plugin folder to:  wp-content/plugins/pw-user-geo/
-2. Activate it from **WordPress → Plugins**.
-3. Download the latest [GeoLite2-Country.mmdb](https://dev.maxmind.com/geoip/geolite2-free-geolocation-data)  
-and place it inside the plugin folder.
-4. (Optional) Run composer in the plugin folder to install dependencies: composer require geoip2/geoip2:^2.13
+## Installation
 
-⚙️ Admin Settings
+1. Download `pw-user-geo.zip` from the
+   [latest release](https://github.com/yanivcoweb/pw-user-geo/releases/latest)
+   and install it from **Plugins → Add New → Upload Plugin**.
+   The release ZIP already contains the `vendor/` folder.
+2. Download `GeoLite2-Country.mmdb` from
+   [MaxMind](https://dev.maxmind.com/geoip/geolite2-free-geolocation-data)
+   (free account required) and place it in `wp-content/plugins/pw-user-geo/`.
+   MaxMind's licence does not allow bundling it with the plugin.
+3. Activate the plugin.
+4. Check **Tools → PW User Geo** to see the detected IP and country.
 
-Go to Settings → PW User Geo Redirects
+### Installing from source
 
-You can define redirect rules in this format:
+If you clone the repository instead of using the release ZIP, install the
+dependencies yourself:
 
-IL|https://he.webdevtest.co.il{REQUEST_URI}
-FR|https://fr.webdevtest.co.il{REQUEST_URI}
-ES|https://es.webdevtest.co.il{REQUEST_URI}
-DE|https://de.webdevtest.co.il{REQUEST_URI}
-*|https://webdevtest.co.il{REQUEST_URI}
+```bash
+cd wp-content/plugins/pw-user-geo
+composer install --no-dev
+```
 
+### Using a different database path
 
-Notes:
+The plugin looks for the database next to `pw-user-geo.php`. To keep it
+elsewhere, define the path in `wp-config.php`:
 
-CC = Country ISO code (e.g., IL, FR, US, etc.)
+```php
+define( 'PW_USER_GEO_MAXMIND_DB', '/path/to/GeoLite2-Country.mmdb' );
+```
 
-{REQUEST_URI} will be replaced with the current page path
+or use the `pw_user_geo_maxmind_db_path` filter.
 
-Use * as fallback for all other countries
+## Redirect rules
 
-🧩 Shortcodes & PHP Functions
-Display the visitor’s country
+Go to **Settings → PW User Geo Redirects**, tick **Enable redirects** and add
+one rule per line:
+
+```text
+IL|https://il.example.com{REQUEST_URI}
+FR|https://fr.example.com{REQUEST_URI}
+*|https://example.com{REQUEST_URI}
+```
+
+- `CC` is a two-letter ISO country code (`IL`, `FR`, `US`, …).
+- `{REQUEST_URI}` is replaced with the current path and query string.
+- `*` is the fallback for every other country.
+- Lines starting with `#` are ignored.
+
+No rules are set by default. Redirects only run on pages that output the
+redirect script (see below), and never when the target URL is the current URL.
+
+## Shortcodes and PHP functions
+
+### Show the visitor's country (cache-safe)
 
 Shortcode:
+
+```text
 [pw_user_country label="Detecting…"]
-
-PHP function:
-echo pw_user_geo_country_html('Loading country...');
-
-Trigger redirect by user country
-
-Shortcode:
-[pw_user_geo_redirect]
+```
 
 PHP:
+
+```php
+echo pw_user_geo_country_html( 'Loading country…' );
+```
+
+The placeholder is filled in by a small script, so the page itself can be cached.
+
+### Show location fields (not cache-safe)
+
+```text
+[pw_user_geo fields="country,country_code" wrapper="inline" show_labels="1"]
+```
+
+`wrapper` can be `inline`, `list` or `none`. Use this only on pages that are
+not cached, because the value is rendered on the server.
+
+### Trigger the redirect
+
+Shortcode:
+
+```text
+[pw_user_geo_redirect]
+```
+
+PHP (for example in the theme header):
+
+```php
 echo pw_user_geo_redirect_html();
+```
 
-🚀 Debugging Tips
+### Raw data
 
-Visit Tools → PW User Geo to check detected IP & country.
+```php
+$geo = pw_user_geo_get();        // array with ip, country, country_code, … or an error string
+$country = pw_user_geo_country(); // country name, or '' if unknown
+```
 
-Append ?pw_geo_ip=8.8.8.8 to override IP manually (for testing).
+## Filters
 
-Append ?pw_geo_flush=1 to clear IP cache.
+| Filter | Default | Purpose |
+| --- | --- | --- |
+| `pw_user_geo_maxmind_db_path` | `PW_USER_GEO_MAXMIND_DB` | Path to the `.mmdb` file |
+| `pw_user_geo_cache_ttl` | `12 * HOUR_IN_SECONDS` | How long a lookup is cached per IP |
 
-Append ?geo_noredirect=1 to disable redirect (sets cookie).
+## Debugging
 
-🧠 Requirements
+- **Tools → PW User Geo** shows the detected IP, country and any error.
+- Append `?pw_geo_ip=8.8.8.8` to look up a specific IP instead of yours.
+- Append `?pw_geo_flush=1` to clear the cached lookup for the current IP.
+- Append `?geo_noredirect=1` to stop redirects for 30 days (sets a cookie).
 
-PHP 7.4+ (tested up to PHP 8.3)
+## Author
 
-WordPress 6.0+
+Yaniv Sasson, WordPress developer: <https://yanivsasson.co.il>
 
-MaxMind GeoLite2-Country database
+## License
 
-geoip2/geoip2 Composer package
+GPL-2.0-or-later. See [LICENSE](LICENSE).
 
-👨‍💻 Author
-
-Yaniv Sasson
-WordPress Developer — https://yanivsasson.co.il
-
-📄 License
-
-GPL-2.0+
-This product includes GeoLite2 data created by MaxMind, available from https://www.maxmind.com
-
-
----
-
-Would you like me to create a **`README.md` file ready to copy** into your plugin folder (with Markdown formatting and emoji icons preserved)?  
-I can generate and format it exactly for GitHub preview.
+This product includes GeoLite2 data created by MaxMind, available from
+<https://www.maxmind.com>.

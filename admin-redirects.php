@@ -3,15 +3,20 @@ if ( ! defined( 'ABSPATH' ) ) exit;
 
 define( 'PW_USER_GEO_REDIRECT_OPTION', 'pw_user_geo_redirects' );
 
-/** Defaults (textarea-based) */
+/** Defaults (textarea-based). No rules ship by default; the settings page shows the format. */
 function pw_user_geo_redirect_default_options() {
 	return [
 		'enabled'        => 0,
 		'skip_logged_in' => 1,
 		'skip_admins'    => 1,
 		'respect_bypass' => 1,
-		'mapping_raw'    => "IL|https://he.webdevtest.co.il{REQUEST_URI}\nFR|https://fr.webdevtest.co.il{REQUEST_URI}\nES|https://es.webdevtest.co.il{REQUEST_URI}\nPT|https://pd.webdevtest.co.il{REQUEST_URI}\nDE|https://de.webdevtest.co.il{REQUEST_URI}\n*|https://webdevtest.co.il{REQUEST_URI}",
+		'mapping_raw'    => '',
 	];
+}
+
+/** Example rules shown as help text on the settings page. */
+function pw_user_geo_redirect_example_mapping() {
+	return "IL|https://il.example.com{REQUEST_URI}\nFR|https://fr.example.com{REQUEST_URI}\n*|https://example.com{REQUEST_URI}";
 }
 
 /** Parse textarea rules → array('IL' => 'https://..{REQUEST_URI}', '*' => 'https://..') */
@@ -61,9 +66,15 @@ add_action( 'admin_init', function () {
 					'mapping_raw'    => isset($input['mapping_raw']) ? (string)$input['mapping_raw'] : $def['mapping_raw'],
 				];
 
-				// If nothing valid was parsed, fall back to defaults
+				// Keep what the admin typed, but warn when no line is a valid rule
 				$parsed = pw_user_geo_redirect_parse_mapping( $out['mapping_raw'] );
-				if ( empty($parsed) ) $out['mapping_raw'] = $def['mapping_raw'];
+				if ( empty($parsed) && trim( $out['mapping_raw'] ) !== '' && function_exists( 'add_settings_error' ) ) {
+					add_settings_error(
+						PW_USER_GEO_REDIRECT_OPTION,
+						'pw_user_geo_no_valid_rules',
+						__( 'No valid redirect rules were found. Use one rule per line: CC|https://example.com{REQUEST_URI}', 'pw-user-geo' )
+					);
+				}
 
 				return $out;
 			},
@@ -121,11 +132,14 @@ function pw_user_geo_redirects_render_page() {
 				<tr>
 					<th scope="row"><?php esc_html_e( 'Country → URL rules', 'pw-user-geo' ); ?></th>
 					<td>
-<textarea name="<?php echo esc_attr( PW_USER_GEO_REDIRECT_OPTION ); ?>[mapping_raw]" rows="8" cols="80" class="large-text code"><?php echo esc_textarea( $opt['mapping_raw'] ); ?></textarea>
+<textarea name="<?php echo esc_attr( PW_USER_GEO_REDIRECT_OPTION ); ?>[mapping_raw]" rows="8" cols="80" class="large-text code" placeholder="<?php echo esc_attr( pw_user_geo_redirect_example_mapping() ); ?>"><?php echo esc_textarea( $opt['mapping_raw'] ); ?></textarea>
 						<p class="description">
 							<?php esc_html_e( 'One rule per line. Format:', 'pw-user-geo' ); ?><br>
-							<code>CC|https://example.com{REQUEST_URI}</code> &nbsp; <?php esc_html_e( '(Use * as fallback)', 'pw-user-geo' ); ?>
+							<code>CC|https://example.com{REQUEST_URI}</code> &nbsp; <?php esc_html_e( '(Use * as fallback)', 'pw-user-geo' ); ?><br>
+							<?php esc_html_e( 'CC is a two-letter ISO country code. {REQUEST_URI} is replaced with the current path and query string. Lines starting with # are ignored.', 'pw-user-geo' ); ?>
 						</p>
+						<p class="description"><?php esc_html_e( 'Example:', 'pw-user-geo' ); ?></p>
+						<pre class="code"><?php echo esc_html( pw_user_geo_redirect_example_mapping() ); ?></pre>
 					</td>
 				</tr>
 			</table>

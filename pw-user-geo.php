@@ -3,8 +3,11 @@
  * Plugin Name: PW User Geo
  * Description: Detects the visitor’s IP (proxy-aware) using a local MaxMind GeoLite2-Country.mmdb file. Caches results and exposes a shortcode/helper to display the country.
  * Version:     1.1.1
+ * Requires at least: 6.0
+ * Requires PHP:      7.4
  * Author:      Yaniv Sasson
  * License:     GPL-2.0+
+ * License URI: https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
  * Text Domain: pw-user-geo
  */
 
