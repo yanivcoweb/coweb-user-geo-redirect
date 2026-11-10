@@ -1,16 +1,18 @@
-<?php 
+<?php
+if ( ! defined( 'ABSPATH' ) ) exit;
+
 /**
  * Tiny Tools screen to verify output.
  */
 add_action( 'admin_menu', function () {
 	add_management_page(
-		__( 'PW User Geo Test', 'pw-user-geo' ),
-		__( 'PW User Geo', 'pw-user-geo' ),
+		__( 'User Geo Test', 'coweb-user-geo-redirect' ),
+		__( 'User Geo', 'coweb-user-geo-redirect' ),
 		'manage_options',
-		'pw-user-geo-test',
+		'coweb-user-geo-redirect-test',
 		function () {
 			$geo = PW_User_Geo::instance()->get_location_data();
-			echo '<div class="wrap"><h1>PW User Geo Test</h1>';
+			echo '<div class="wrap"><h1>' . esc_html__( 'User Geo Test', 'coweb-user-geo-redirect' ) . '</h1>';
 			echo '<p><em>Detected IP:</em> <code>' . esc_html( $geo['ip'] ) . '</code></p>';
 			echo '<p><strong>Provider:</strong> ' . esc_html( $geo['provider'] ?? '' ) . '</p>';
 			if ( ! empty( $geo['error'] ) ) {
